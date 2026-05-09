@@ -10,6 +10,7 @@ from .pairs_trading import (
     PairsSignal,
     PairsTradingStrategy,
     kalman_pairs,
+    rolling_half_life,
 )
 from .portfolio import AllocatorOutput, combine
 from .trend_following import TrendFollowingStrategy
@@ -42,4 +43,5 @@ __all__ = [
     "combine",
     "get_strategy",
     "kalman_pairs",
+    "rolling_half_life",
 ]

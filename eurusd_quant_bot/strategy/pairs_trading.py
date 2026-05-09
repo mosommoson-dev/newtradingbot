@@ -98,6 +98,24 @@ class PairsSignal:
     beta: pd.Series       # hedge ratio for sizing leg B at each bar
     z: pd.Series          # z-score of the spread (rolling)
     spread: pd.Series
+    half_life: pd.Series | None = None  # rolling half-life of mean reversion (days)
+
+
+def rolling_half_life(spread: pd.Series, window: int = 60) -> pd.Series:
+    """Rolling Ornstein-Uhlenbeck half-life of mean reversion.
+
+    Fits ``Δs_t = κ · s_{t-1} + ε_t`` over a rolling window; the half-life is
+    ``-ln(2) / κ``.  Returns ``NaN`` whenever the spread is trending (κ ≥ 0),
+    which is exactly the regime we want the gate to block.
+    """
+    delta = spread.diff()
+    lagged = spread.shift(1)
+    cov = delta.rolling(window).cov(lagged)
+    var = lagged.rolling(window).var()
+    kappa = cov / var.replace(0, np.nan)
+    # Only mean-reverting (kappa < 0) gets a positive, finite half-life
+    hl = -np.log(2.0) / kappa.where(kappa < 0)
+    return hl.rename("half_life")
 
 
 def rolling_ols_pairs(
@@ -145,6 +163,23 @@ class PairsTradingStrategy:
         Window length for ``rolling_ols`` mode.
     kalman_obs_var, kalman_trans_var : float
         Kalman filter measurement and transition variances.
+    stop_loss_z : float
+        Hard exit when the absolute spread z-score breaches this level.
+        Defends against cointegration breaks where the spread keeps
+        diverging instead of reverting.  Set to ``0`` (or any non-positive
+        value) to disable the stop entirely.  Recommended: ~2x ``z_entry``.
+    max_holding_days : int
+        Force-exit after this many bars in a single position.  Cointegration
+        relationships should mean-revert quickly; if a trade hasn't reverted
+        within this horizon the relationship has likely broken.  Set to
+        ``0`` to disable.
+    max_half_life : float
+        Only allow new entries when the rolling Ornstein-Uhlenbeck
+        half-life of the spread is finite and ``<= max_half_life`` bars.
+        This gates entries on whether the spread is currently mean-
+        reverting (rather than trending).  Set to ``0`` to disable.
+    half_life_window : int
+        Rolling window used to estimate the OU half-life.
     """
 
     name: str = "pairs_trading"
@@ -158,6 +193,10 @@ class PairsTradingStrategy:
         hedge_window: int = 252,
         kalman_obs_var: float = 1e-3,
         kalman_trans_var: float = 1e-5,
+        stop_loss_z: float = 0.0,
+        max_holding_days: int = 0,
+        max_half_life: float = 0.0,
+        half_life_window: int = 60,
     ) -> None:
         if z_exit >= z_entry:
             raise ValueError(f"z_exit ({z_exit}) must be < z_entry ({z_entry})")
@@ -169,6 +208,19 @@ class PairsTradingStrategy:
             raise ValueError(f"hedge_window must be >= 20, got {hedge_window}")
         if kalman_obs_var <= 0 or kalman_trans_var <= 0:
             raise ValueError("Kalman variances must be positive")
+        if stop_loss_z != 0 and stop_loss_z <= z_entry:
+            raise ValueError(
+                f"stop_loss_z ({stop_loss_z}) must be > z_entry ({z_entry}) "
+                f"or 0 to disable")
+        if max_holding_days < 0:
+            raise ValueError(
+                f"max_holding_days must be >= 0, got {max_holding_days}")
+        if max_half_life < 0:
+            raise ValueError(
+                f"max_half_life must be >= 0, got {max_half_life}")
+        if half_life_window < 10:
+            raise ValueError(
+                f"half_life_window must be >= 10, got {half_life_window}")
         self.z_entry = float(z_entry)
         self.z_exit = float(z_exit)
         self.z_lookback = int(z_lookback)
@@ -176,11 +228,22 @@ class PairsTradingStrategy:
         self.hedge_window = int(hedge_window)
         self.kalman_obs_var = float(kalman_obs_var)
         self.kalman_trans_var = float(kalman_trans_var)
+        self.stop_loss_z = float(stop_loss_z)
+        self.max_holding_days = int(max_holding_days)
+        self.max_half_life = float(max_half_life)
+        self.half_life_window = int(half_life_window)
 
     # ------------------------------------------------------------------
 
     def fit_predict(self, price_a: pd.Series, price_b: pd.Series) -> PairsSignal:
-        """Run the strategy and return the spread position over time."""
+        """Run the strategy and return the spread position over time.
+
+        With all three Tier-1 guards (`stop_loss_z`, `max_holding_days`,
+        `max_half_life`) disabled the position vector is identical to the
+        classic vectorised z-score rule (entries on |z|>=z_entry,
+        forward-filled until |z|<z_exit).  When any guard is on, the
+        loop is iterative so we can track per-trade state.
+        """
         if self.hedge_mode == "kalman":
             kf = kalman_pairs(
                 price_a, price_b,
@@ -195,18 +258,77 @@ class PairsTradingStrategy:
         roll_std = spread.rolling(self.z_lookback).std()
         z = (spread - roll_mean) / roll_std
 
-        pos = pd.Series(np.nan, index=spread.index, dtype=float)
-        # Vectorised entry rule:
-        pos.loc[z <= -self.z_entry] = 1.0   # spread is too low -> long it
-        pos.loc[z >= self.z_entry] = -1.0   # spread is too high -> short it
-        # Hold until z reverts inside [-z_exit, +z_exit], then exit.
-        pos = pos.ffill().fillna(0.0)
-        flat_mask = z.abs() < self.z_exit
-        pos.loc[flat_mask] = 0.0
-        # Re-forward-fill the remaining NaNs (warmup) with 0
-        pos = pos.fillna(0.0).astype(int)
+        use_stop = self.stop_loss_z > 0
+        use_max_hold = self.max_holding_days > 0
+        use_hl = self.max_half_life > 0
 
-        return PairsSignal(position=pos, beta=kf.beta, z=z, spread=spread)
+        # Half-life only computed when the gate is enabled, otherwise NaN.
+        if use_hl:
+            half_life = rolling_half_life(spread, window=self.half_life_window)
+        else:
+            half_life = pd.Series(np.nan, index=spread.index, name="half_life")
+
+        if not (use_stop or use_max_hold or use_hl):
+            # Vectorised classic rule (preserves the original baseline).
+            pos = pd.Series(np.nan, index=spread.index, dtype=float)
+            pos.loc[z <= -self.z_entry] = 1.0
+            pos.loc[z >= self.z_entry] = -1.0
+            pos = pos.ffill().fillna(0.0)
+            pos.loc[z.abs() < self.z_exit] = 0.0
+            pos = pos.fillna(0.0).astype(int)
+            return PairsSignal(position=pos, beta=kf.beta, z=z, spread=spread,
+                                half_life=half_life)
+
+        # Iterative path with per-trade state for the guards.
+        n = len(z)
+        z_arr = z.to_numpy()
+        hl_arr = half_life.to_numpy()
+        pos_arr = np.zeros(n, dtype=np.int64)
+        cur = 0           # current open position
+        bars_in_pos = 0   # bars in the current open trade
+        # When a guard fires, we want to stay flat for the rest of THIS bar
+        # (no same-bar re-entry) — the next bar can re-enter normally.
+        # So `stopped_this_bar` is consulted only inside the entry block.
+        for i in range(n):
+            zi = z_arr[i]
+            if not np.isfinite(zi):
+                pos_arr[i] = 0
+                continue
+
+            stopped_this_bar = False
+            if cur != 0:
+                bars_in_pos += 1
+                if abs(zi) < self.z_exit:
+                    cur = 0
+                    bars_in_pos = 0
+                elif use_stop and abs(zi) >= self.stop_loss_z:
+                    cur = 0
+                    bars_in_pos = 0
+                    stopped_this_bar = True
+                elif use_max_hold and bars_in_pos > self.max_holding_days:
+                    cur = 0
+                    bars_in_pos = 0
+                    stopped_this_bar = True
+
+            if cur == 0 and not stopped_this_bar:
+                # Half-life gate filters entry; pure entry rule otherwise.
+                hl_ok = True
+                if use_hl:
+                    hli = hl_arr[i]
+                    hl_ok = bool(np.isfinite(hli)) and (hli <= self.max_half_life)
+                if hl_ok:
+                    if zi <= -self.z_entry:
+                        cur = 1
+                        bars_in_pos = 1
+                    elif zi >= self.z_entry:
+                        cur = -1
+                        bars_in_pos = 1
+
+            pos_arr[i] = cur
+
+        pos = pd.Series(pos_arr, index=spread.index, dtype=int, name="position")
+        return PairsSignal(position=pos, beta=kf.beta, z=z, spread=spread,
+                            half_life=half_life)
 
 
 __all__ = [
@@ -214,5 +336,6 @@ __all__ = [
     "PairsSignal",
     "PairsTradingStrategy",
     "kalman_pairs",
+    "rolling_half_life",
     "rolling_ols_pairs",
 ]

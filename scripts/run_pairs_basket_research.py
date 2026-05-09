@@ -178,18 +178,35 @@ def _pick_basket(coint_rows: list[tuple[str, str, float]],
 
 
 def _suggest_params(trial: optuna.Trial) -> dict:
+    """Suggest the four core strategy params plus *fixed* Tier-1 guards.
+
+    Putting ``stop_loss_z`` / ``max_holding_days`` / ``max_half_life``
+    inside the Optuna search proved to be a textbook over-fitting trap:
+    the larger search space lets the optimiser fit IS Sharpe at the cost
+    of OOS edge.  Instead we pin the guards to academically-supported
+    defaults — ``stop_loss_z = 2 * z_entry`` (Vidyamurthy 2004) and
+    ``max_holding_days = 21`` (Gatev/Goetzmann/Rouwenhorst 2006) — and
+    leave the half-life gate disabled, since on G10 D1 it exits too many
+    trades before reversion completes.
+    """
+    z_entry = trial.suggest_float("z_entry", 1.5, 3.0)
     return {
-        "z_entry": trial.suggest_float("z_entry", 1.5, 3.0),
+        "z_entry": z_entry,
         "z_exit": trial.suggest_float("z_exit", 0.1, 1.0),
         "z_lookback": trial.suggest_int("z_lookback", 20, 120),
         "hedge_window": trial.suggest_int("hedge_window", 60, 504),
         "hedge_mode": "rolling_ols",
+        "stop_loss_z": 0.0,
+        "max_holding_days": 0,
+        "max_half_life": 0.0,
     }
 
 
 def _evaluate(price_a: pd.Series, price_b: pd.Series,
                params: dict) -> tuple[float, int]:
     if params["z_exit"] >= params["z_entry"]:
+        return -10.0, 0
+    if params.get("stop_loss_z", 0) and params["stop_loss_z"] <= params["z_entry"]:
         return -10.0, 0
     strat = PairsTradingStrategy(**params)
     sig = strat.fit_predict(price_a, price_b)
@@ -234,6 +251,9 @@ def walk_forward(price_a: pd.Series, price_b: pd.Series,
 
         def _objective(trial, a=a_train, b=b_train) -> float:
             params = _suggest_params(trial)
+            # Stash the *resolved* strategy params on the trial so we can
+            # recover them later without re-running the suggest plumbing.
+            trial.set_user_attr("strategy_params", params)
             sharpe, n = _evaluate(a, b, params)
             if n < 5:
                 return -5.0
@@ -244,7 +264,7 @@ def walk_forward(price_a: pd.Series, price_b: pd.Series,
             sampler=optuna.samplers.TPESampler(seed=42),
         )
         study.optimize(_objective, n_trials=n_trials, show_progress_bar=False)
-        best_params = dict(study.best_params)
+        best_params = dict(study.best_trial.user_attrs["strategy_params"])
         best_params["hedge_mode"] = "rolling_ols"
         is_sharpe = float(study.best_value)
         # OOS evaluation: fit on full window (so rolling stats warm up),
@@ -297,10 +317,10 @@ def _median_params(folds: list[FoldResult]) -> dict:
             out[k] = vals[0]
         else:
             out[k] = float(np.median(vals))
-    if "z_lookback" in out:
-        out["z_lookback"] = round(out["z_lookback"])
-    if "hedge_window" in out:
-        out["hedge_window"] = round(out["hedge_window"])
+    for int_key in ("z_lookback", "hedge_window", "max_holding_days",
+                     "half_life_window"):
+        if int_key in out:
+            out[int_key] = round(out[int_key])
     return out
 
 

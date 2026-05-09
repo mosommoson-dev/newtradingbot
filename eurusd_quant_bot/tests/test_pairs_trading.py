@@ -10,6 +10,7 @@ from eurusd_quant_bot.backtest import run_pairs_backtest
 from eurusd_quant_bot.strategy import (
     PairsTradingStrategy,
     kalman_pairs,
+    rolling_half_life,
 )
 
 
@@ -115,3 +116,150 @@ def test_pairs_strategy_no_lookahead():
         full.position.iloc[:cut].values,
         truncated.position.values,
     )
+
+
+def _diverging_spread(n: int = 400, seed: int = 11) -> tuple[pd.Series, pd.Series]:
+    """Two series with a sustained spread blow-out.
+
+    The first half is mean-reverting; halfway through the spread takes a
+    large step jump and stays there.  The rolling z-score is therefore
+    persistently above the entry threshold (until rolling stats catch
+    up) — a clean test of "what happens when cointegration breaks".
+    """
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range("2022-01-01", periods=n, freq="D", tz="UTC")
+    b_steps = rng.normal(0, 0.005, size=n)
+    log_b = np.cumsum(b_steps)
+    b = 1.10 * np.exp(log_b)
+    spread = rng.normal(0, 0.001, size=n)
+    # Step jump halfway through: spread mean shifts from 0 to 0.05
+    half = n // 2
+    spread[half:] += 0.05
+    a = 1.30 * b + spread
+    return (
+        pd.Series(a, index=idx, name="A"),
+        pd.Series(b, index=idx, name="B"),
+    )
+
+
+def _count_trades(position: pd.Series) -> int:
+    """Count distinct positions (trades) in a position series."""
+    return int(((position != position.shift(1)) & (position != 0)).sum())
+
+
+def test_stop_loss_fires_on_diverging_spread():
+    """A tighter stop_loss_z must produce more stop-out events (and so
+    fewer bars in any one open position) than a looser one.  Both runs
+    use the iterative path so the comparison is apples to apples."""
+    a, b = _diverging_spread(n=400, seed=12)
+    loose = PairsTradingStrategy(z_entry=1.5, z_exit=0.5, z_lookback=30,
+                                   hedge_window=60, stop_loss_z=10.0)
+    tight = PairsTradingStrategy(z_entry=1.5, z_exit=0.5, z_lookback=30,
+                                   hedge_window=60, stop_loss_z=2.5)
+    sig0 = loose.fit_predict(a, b)
+    sig1 = tight.fit_predict(a, b)
+    # The tight stop must produce strictly fewer bars in non-zero position.
+    bars0 = int((sig0.position != 0).sum())
+    bars1 = int((sig1.position != 0).sum())
+    assert bars1 < bars0, (
+        f"tight stop_loss should reduce time-in-position (bars0={bars0}, "
+        f"bars1={bars1})"
+    )
+
+
+def _max_consecutive_pos(position: pd.Series) -> int:
+    """Length of the longest run of contiguous non-zero positions."""
+    nz = (position != 0).astype(int).to_numpy()
+    best = run = 0
+    for v in nz:
+        run = run + 1 if v else 0
+        best = max(best, run)
+    return best
+
+
+def test_max_holding_days_caps_individual_trade_length():
+    """A short max_holding_days must produce shorter contiguous trades
+    than a long one.  Both runs use the iterative path."""
+    a, b = _diverging_spread(n=400, seed=13)
+    long_hold = PairsTradingStrategy(z_entry=1.5, z_exit=0.5, z_lookback=30,
+                                       hedge_window=60, max_holding_days=200)
+    short_hold = PairsTradingStrategy(z_entry=1.5, z_exit=0.5, z_lookback=30,
+                                        hedge_window=60, max_holding_days=10)
+    sig0 = long_hold.fit_predict(a, b)
+    sig1 = short_hold.fit_predict(a, b)
+    run0 = _max_consecutive_pos(sig0.position)
+    run1 = _max_consecutive_pos(sig1.position)
+    # Short max-holding must cap the longest contiguous trade
+    assert run1 < run0, (
+        f"max_holding_days=10 must shorten longest contiguous trade vs 200 "
+        f"(run0={run0}, run1={run1})"
+    )
+    # And the cap must be enforced: no trade can run longer than
+    # max_holding_days + a tiny amount of slack from same-bar bookkeeping.
+    assert run1 <= 11, f"longest run with cap=10 should be ~10 (got {run1})"
+
+
+def test_half_life_gate_blocks_entries_in_trending_regime():
+    """When the rolling OU half-life on the spread is high, a tight
+    gate must allow strictly fewer entries.  We construct a series
+    whose spread first mean-reverts and then trends, and check that
+    the tighter gate hides more of the trending portion."""
+    rng = np.random.default_rng(21)
+    n = 400
+    idx = pd.date_range("2022-01-01", periods=n, freq="D", tz="UTC")
+    b_steps = rng.normal(0, 0.005, size=n)
+    log_b = np.cumsum(b_steps)
+    b = 1.10 * np.exp(log_b)
+    # Deterministic trend in the spread so the OLS hedge can't
+    # absorb it: forces high (or NaN) half-life in the trending half.
+    spread = np.concatenate([
+        rng.normal(0, 0.002, size=n // 2),
+        np.linspace(0, 0.05, n - n // 2),
+    ])
+    a = 1.30 * b + spread
+    A = pd.Series(a, index=idx, name="A")
+    B = pd.Series(b, index=idx, name="B")
+    loose_gate = PairsTradingStrategy(z_entry=1.5, z_exit=0.5, z_lookback=30,
+                                        hedge_window=60,
+                                        max_half_life=9999.0,
+                                        half_life_window=60)
+    tight_gate = PairsTradingStrategy(z_entry=1.5, z_exit=0.5, z_lookback=30,
+                                        hedge_window=60,
+                                        max_half_life=5.0,
+                                        half_life_window=60)
+    sig0 = loose_gate.fit_predict(A, B)
+    sig1 = tight_gate.fit_predict(A, B)
+    bars0 = int((sig0.position != 0).sum())
+    bars1 = int((sig1.position != 0).sum())
+    assert bars1 < bars0, (
+        f"tight half-life gate must reduce entries in trending regime "
+        f"(bars0={bars0}, bars1={bars1})"
+    )
+
+
+def test_rolling_half_life_is_finite_for_mean_reverting_series():
+    """A strongly mean-reverting AR(1) spread must yield a finite half-life."""
+    rng = np.random.default_rng(0)
+    n = 500
+    s = np.zeros(n)
+    for t in range(1, n):
+        s[t] = 0.5 * s[t - 1] + rng.normal(0, 1.0)
+    spread = pd.Series(s, index=pd.date_range("2022-01-01", periods=n, freq="D"))
+    hl = rolling_half_life(spread, window=60)
+    # On a 0.5-AR(1), the theoretical half-life is ln(2) / -ln(0.5) ~ 1 day.
+    # We don't need to recover it precisely, just that the rolling estimate
+    # is finite for the bulk of the series.
+    finite = hl.dropna()
+    assert len(finite) > 0
+    assert (finite > 0).all()
+
+
+def test_strategy_validation_new_params():
+    with pytest.raises(ValueError, match="stop_loss_z"):
+        PairsTradingStrategy(z_entry=2.0, z_exit=0.5, stop_loss_z=1.5)
+    with pytest.raises(ValueError, match="max_holding_days"):
+        PairsTradingStrategy(max_holding_days=-1)
+    with pytest.raises(ValueError, match="max_half_life"):
+        PairsTradingStrategy(max_half_life=-1)
+    with pytest.raises(ValueError, match="half_life_window"):
+        PairsTradingStrategy(half_life_window=5)

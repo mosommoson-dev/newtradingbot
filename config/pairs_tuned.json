@@ -6,7 +6,10 @@
       "z_exit": 0.3388583367234101,
       "z_lookback": 105,
       "hedge_window": 165,
-      "hedge_mode": "rolling_ols"
+      "hedge_mode": "rolling_ols",
+      "stop_loss_z": 0.0,
+      "max_holding_days": 0,
+      "max_half_life": 0.0
     },
     "stats": {
       "total_return": 0.11049084571749068,
@@ -38,7 +41,10 @@
       "z_exit": 0.2315000258257638,
       "z_lookback": 83,
       "hedge_window": 223,
-      "hedge_mode": "rolling_ols"
+      "hedge_mode": "rolling_ols",
+      "stop_loss_z": 0.0,
+      "max_holding_days": 0,
+      "max_half_life": 0.0
     },
     "stats": {
       "total_return": 0.06279140783203507,
@@ -70,7 +76,10 @@
       "z_exit": 0.4520235491563165,
       "z_lookback": 102,
       "hedge_window": 388,
-      "hedge_mode": "rolling_ols"
+      "hedge_mode": "rolling_ols",
+      "stop_loss_z": 0.0,
+      "max_holding_days": 0,
+      "max_half_life": 0.0
     },
     "stats": {
       "total_return": 0.5823271101551908,

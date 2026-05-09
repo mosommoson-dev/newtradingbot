@@ -157,10 +157,21 @@ def _step_one_pair(label: str, params: dict, state: PaperState,
     if len(a_close) < 200:
         raise RuntimeError(f"Not enough history for {label}")
 
-    # Strip non-strategy fields (best_mode, hedge_mode is OK)
-    cleaned = {k: v for k, v in params.items()
-               if k in ("z_entry", "z_exit", "z_lookback", "hedge_mode",
-                        "hedge_window", "kalman_obs_var", "kalman_trans_var")}
+    # Strip non-strategy fields and coerce numeric types loaded from JSON.
+    allowed = ("z_entry", "z_exit", "z_lookback", "hedge_mode",
+                "hedge_window", "kalman_obs_var", "kalman_trans_var",
+                "stop_loss_z", "max_holding_days", "max_half_life",
+                "half_life_window")
+    int_keys = {"z_lookback", "hedge_window", "max_holding_days",
+                  "half_life_window"}
+    cleaned: dict[str, Any] = {}
+    for k, v in params.items():
+        if k not in allowed:
+            continue
+        if k in int_keys and v is not None:
+            cleaned[k] = int(v)
+        else:
+            cleaned[k] = v
     strat = PairsTradingStrategy(**cleaned)
     sig = strat.fit_predict(a_close, b_close)
     res = run_pairs_backtest(a_close, b_close, sig.position, sig.beta,
