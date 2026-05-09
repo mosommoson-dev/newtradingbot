@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Tests / coverage
+.tox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+htmlcov/
+coverage.xml
+*.cover
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environments
+.env
+.env.*
+!.env.example
+
+# Secrets
+*.pem
+*.key
+
+# Logs / data / reports
+logs/
+*.log
+data/raw/
+data/processed/
+data/features/*.parquet
+data/paper_state.json
+reports/*.html
+reports/*.csv
+reports/*.png
+!reports/.gitkeep
+
+# ML artifacts
+ml/artifacts/
+*.h5
+*.pt
+*.pkl
+*.joblib
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store

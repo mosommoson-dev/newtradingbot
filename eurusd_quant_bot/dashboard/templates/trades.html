@@ -1,0 +1,30 @@
+{% extends "_layout.html" %}
+{% block title %}Trades{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>Recent trades</h2>
+    {% if rows %}
+    <table>
+        <thead>
+            <tr><th>Strategy</th><th>Direction</th><th>Entry</th><th>Exit</th>
+                <th>Lots</th><th>PnL ($)</th><th>PnL (pips)</th></tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td>{{ row.strategy }}</td>
+                <td>{{ "BUY" if row.direction == 1 else "SELL" }}</td>
+                <td>{{ row.entry_time }}</td>
+                <td>{{ row.exit_time }}</td>
+                <td>{{ "%.2f"|format(row.lot_size) }}</td>
+                <td>{{ "%.2f"|format(row.pnl or 0) }}</td>
+                <td>{{ "%.1f"|format(row.pnl_pips or 0) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No trades yet.</p>
+    {% endif %}
+</div>
+{% endblock %}

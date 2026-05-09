@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eurusd_quant_bot"
+version = "0.1.0"
+description = "Quantitative trading bot for EUR/USD with mean reversion, trend following, and ML ensemble strategies."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "EUR/USD Quant Bot Maintainers" }]
+license = { text = "MIT" }
+dependencies = []
+
+[tool.setuptools]
+packages = ["eurusd_quant_bot"]
+
+[tool.pytest.ini_options]
+testpaths = ["eurusd_quant_bot/tests"]
+addopts = "-q --strict-markers"
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "RUF"]
+ignore = [
+    "E501",   # line too long, handled by formatter
+    "B008",   # function call in default argument (used by typer/pydantic)
+    "RUF012", # mutable class attrs without ClassVar (we annotate inline)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/*" = ["B011"]
+"**/__init__.py" = ["F401"]
