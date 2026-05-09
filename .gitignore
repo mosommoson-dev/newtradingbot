@@ -52,6 +52,7 @@ logs/
 data/raw/
 data/processed/
 data/features/*.parquet
+data/paper_state.json
 reports/*.html
 reports/*.csv
 reports/*.png

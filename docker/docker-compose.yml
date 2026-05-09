@@ -30,6 +30,22 @@ services:
     ports:
       - "5050:5000"
 
+  pairs-daemon:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file: ../.env
+    command: python -m eurusd_quant_bot.live.pairs_daemon
+    restart: unless-stopped
+    environment:
+      # Wake up once per day by default; override for tests
+      PAIRS_DAEMON_INTERVAL_SECONDS: ${PAIRS_DAEMON_INTERVAL_SECONDS:-86400}
+    volumes:
+      - ../logs:/app/logs
+      - ../reports:/app/reports
+      - ../data:/app/data
+      - ../config:/app/config
+
   postgres:
     image: timescale/timescaledb:latest-pg14
     environment:

@@ -5,6 +5,12 @@ from __future__ import annotations
 from .base_strategy import BaseStrategy, Signal
 from .mean_reversion import MeanReversionStrategy
 from .ml_strategy import MLEnsembleStrategy
+from .pairs_trading import (
+    KalmanResult,
+    PairsSignal,
+    PairsTradingStrategy,
+    kalman_pairs,
+)
 from .portfolio import AllocatorOutput, combine
 from .trend_following import TrendFollowingStrategy
 
@@ -26,10 +32,14 @@ __all__ = [
     "STRATEGY_REGISTRY",
     "AllocatorOutput",
     "BaseStrategy",
+    "KalmanResult",
     "MLEnsembleStrategy",
     "MeanReversionStrategy",
+    "PairsSignal",
+    "PairsTradingStrategy",
     "Signal",
     "TrendFollowingStrategy",
     "combine",
     "get_strategy",
+    "kalman_pairs",
 ]

@@ -140,7 +140,53 @@ python -m eurusd_quant_bot.dashboard.app  # http://localhost:5000
 cd docker && docker compose up -d
 ```
 
-This brings up the bot, TimescaleDB (Postgres 14), Redis, and Grafana on port 3000.
+This brings up the bot, TimescaleDB (Postgres 14), Redis, Grafana, and the
+**pairs paper-trading daemon** described below.
+
+### 9. Pairs paper-trading daemon
+
+A long-lived service that runs the cointegration pairs strategy on Dukascopy
+D1 data once per day and posts a Telegram daily summary.
+
+**One-time tuning (run once before starting the daemon):**
+
+```bash
+PYTHONPATH=. python scripts/run_pairs_research.py
+```
+
+This produces:
+- `config/pairs_tuned.json` — the params the daemon will load
+- `reports/pairs_tuning_report_*.html` — full walk-forward + Monte Carlo report
+
+**Start the daemon (runs forever, wakes once per day):**
+
+```bash
+cd docker && docker compose up -d pairs-daemon
+```
+
+Or directly:
+
+```bash
+PYTHONPATH=. python -m eurusd_quant_bot.live.pairs_daemon
+```
+
+For a one-shot iteration (no looping):
+
+```bash
+PYTHONPATH=. PAIRS_DAEMON_ONCE=1 python -m eurusd_quant_bot.live.pairs_daemon
+```
+
+**State persistence:** the daemon writes `data/paper_state.json` (equity,
+open trades, closed trades, daily PnL history) so restarts are safe.
+
+**Telegram messages:** on each run the daemon emits a single summary, plus
+real-time `OPEN/CLOSE/FLIP` messages whenever a trade fires.  Set
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` to enable.
+
+**Honest expectation:** OOS edge after walk-forward tuning is modest
+(Sharpe ~0.2–0.3, profit factor ~1.0–1.1).  This is *not* a high-Sharpe
+strategy — treat the 30-day paper run as a sanity check on infrastructure
+and risk model, not as a guarantee of profitability.
 
 ## Risk model (summary)
 
