@@ -78,10 +78,14 @@ def train_walk_forward(
     target = make_target(features["close"], horizon)
     df = features.join(target).dropna(subset=["target"])
 
-    cols = feature_names(df)
+    # Important: derive feature names from the *features* frame, not the
+    # joined frame.  Otherwise the target column leaks into the predictor
+    # set and the model trivially memorises the label.
+    cols = feature_names(features)
     X = df[cols]
     X = drop_correlated(X, settings.correlation_drop_threshold)
     y = df["target"].astype(int)
+    assert "target" not in X.columns, "Target leaked into features"
 
     folds = _fold_indices(X.index, train_months, test_months)
     fold_rows: list[dict[str, float]] = []

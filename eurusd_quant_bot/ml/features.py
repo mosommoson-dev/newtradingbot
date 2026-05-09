@@ -204,6 +204,7 @@ def build_features(
 
 
 def feature_names(df: pd.DataFrame) -> list[str]:
-    """Return the engineered feature columns (excluding raw OHLCV)."""
-    raw = {"open", "high", "low", "close", "volume"}
-    return [c for c in df.columns if c not in raw]
+    """Return the engineered feature columns (excluding raw OHLCV and any
+    label/target columns that may have been joined in)."""
+    excluded = {"open", "high", "low", "close", "volume", "target"}
+    return [c for c in df.columns if c not in excluded]

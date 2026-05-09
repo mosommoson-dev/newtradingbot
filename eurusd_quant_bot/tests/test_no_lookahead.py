@@ -49,6 +49,27 @@ def test_features_no_negative_lag(synthetic_ohlcv):
     )
 
 
+def test_target_does_not_leak_into_features(synthetic_ohlcv):
+    """Regression test: ml.training must not include the target column in
+    the feature set when it is joined to the feature frame.
+
+    Earlier versions of feature_names() returned every non-OHLCV column,
+    which silently included the joined ``target`` and turned the model into
+    a label-memoriser (producing OOS accuracy of 1.0).
+    """
+    from eurusd_quant_bot.ml.features import build_features, feature_names
+    from eurusd_quant_bot.ml.training import make_target
+
+    feats = build_features(synthetic_ohlcv)
+    target = make_target(feats["close"], horizon=4)
+    joined = feats.join(target)
+    cols = feature_names(joined)
+    assert "target" not in cols, (
+        "target column leaked into feature set; "
+        "this would cause the model to memorise labels"
+    )
+
+
 def test_backtest_fills_at_next_bar_open(synthetic_ohlcv):
     """Engineered fills happen at next bar's open, never current close."""
     s = MeanReversionStrategy(z_score_period=20, z_score_entry=1.0,

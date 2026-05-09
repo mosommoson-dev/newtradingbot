@@ -110,7 +110,17 @@ def compute_metrics(equity: pd.Series, trades: pd.DataFrame) -> PerformanceMetri
         else 0.0
     )
     max_dd, dd_dur_days = _max_drawdown(equity)
-    annual_return = (1 + total_return) ** (factor / max(len(returns), 1)) - 1 if len(returns) else 0.0
+    # Use safe sign-preserving annualisation to avoid complex numbers when
+    # total_return < -1 (a fully blown-up account).
+    if len(returns):
+        base = 1.0 + total_return
+        exponent = factor / max(len(returns), 1)
+        if base <= 0:
+            annual_return = -1.0  # account fully wiped
+        else:
+            annual_return = base ** exponent - 1.0
+    else:
+        annual_return = 0.0
     calmar = annual_return / abs(max_dd) if max_dd < 0 else 0.0
 
     if not trades.empty:
