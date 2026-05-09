@@ -1,0 +1,61 @@
+# ---- Core scientific stack ----
+pandas>=2.1,<3.0
+numpy>=1.26,<2.1
+scipy>=1.11,<2.0
+pyarrow>=15.0
+python-dateutil>=2.8
+
+# ---- Market data ----
+yfinance>=0.2.33
+oandapyV20>=0.7.2
+requests>=2.31
+
+# ---- Indicators ----
+# `ta` is pure-python and used as the default fallback when the optional C-bound
+# TA-Lib (`TA-Lib==0.4.28`) is not available on the host.
+ta>=0.11.0
+# TA-Lib  # uncomment + install libta-lib0 on the host to enable
+
+# ---- Backtesting ----
+vectorbt>=0.25,<0.27
+
+# ---- ML ----
+scikit-learn>=1.3,<1.6
+xgboost>=2.0,<3.0
+shap>=0.44
+
+# Heavy ML deps (optional). Install via `pip install -r requirements-ml.txt`
+# tensorflow>=2.15,<2.17
+# torch>=2.1,<3.0
+
+# ---- Optimization ----
+optuna>=3.5
+
+# ---- Visualization / dashboard ----
+plotly>=5.18
+flask>=3.0
+jinja2>=3.1
+
+# ---- Database ----
+psycopg2-binary>=2.9
+sqlalchemy>=2.0
+redis>=5.0
+
+# ---- Notifications ----
+python-telegram-bot>=20.7,<22.0
+
+# ---- Async / scheduling ----
+aiohttp>=3.9
+apscheduler>=3.10
+
+# ---- Utilities ----
+python-dotenv>=1.0
+loguru>=0.7
+pydantic>=2.5
+typer>=0.9
+
+# ---- Dev / testing ----
+pytest>=7.4
+pytest-asyncio>=0.23
+pytest-cov>=4.1
+ruff>=0.4

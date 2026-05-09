@@ -1,0 +1,19 @@
+{% extends "_layout.html" %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<div class="card">
+    <div class="stat"><div class="stat-label">Mode</div><div class="stat-value">{{ settings.mode }}</div></div>
+    <div class="stat"><div class="stat-label">Max daily loss</div><div class="stat-value">{{ settings.max_daily_loss }}</div></div>
+    <div class="stat"><div class="stat-label">Max DD</div><div class="stat-value">{{ settings.max_total_drawdown }}</div></div>
+    <div class="stat"><div class="stat-label">Risk / trade</div><div class="stat-value">{{ settings.risk_per_trade }}</div></div>
+    <div class="stat"><div class="stat-label">Server time (UTC)</div><div class="stat-value">{{ now }}</div></div>
+</div>
+<div class="card">
+    <div id="equity-chart" style="width: 100%; height: 480px;"></div>
+</div>
+<script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+<script>
+    const fig = {{ fig_json | tojson }};
+    Plotly.newPlot('equity-chart', fig.data, fig.layout, {responsive: true});
+</script>
+{% endblock %}
