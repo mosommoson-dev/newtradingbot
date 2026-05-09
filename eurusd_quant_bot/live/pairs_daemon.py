@@ -123,7 +123,14 @@ def _load_tuned_params(path: Path) -> dict[str, dict[str, Any]]:
     if not path.exists():
         raise FileNotFoundError(f"Tuned-params file not found: {path}.\n"
                                 f"Run scripts/run_pairs_research.py first.")
-    return json.loads(path.read_text())
+    raw = json.loads(path.read_text())
+    # Ignore meta keys (those start with ``__``) and any entry that is not a
+    # genuine pair label of the form ``A/B vs C/D``.
+    return {
+        label: cfg for label, cfg in raw.items()
+        if not label.startswith("__") and " vs " in label
+        and isinstance(cfg, dict) and "params" in cfg
+    }
 
 
 def _fetch_pair(pair_a: str, pair_b: str, lookback_days: int = 800,

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import json
 
-from eurusd_quant_bot.live.pairs_daemon import PaperState, PaperTrade
+from eurusd_quant_bot.live.pairs_daemon import (
+    PaperState,
+    PaperTrade,
+    _load_tuned_params,
+)
 
 
 def test_state_round_trips_through_json(tmp_path):
@@ -54,3 +58,32 @@ def test_state_handles_missing_fields():
     assert state.equity == 10_000.0
     assert state.open_trades == {}
     assert state.closed_trades == []
+
+
+def test_load_tuned_params_filters_meta_keys(tmp_path):
+    """``__basket__`` and other non-pair metadata must be ignored."""
+    raw = {
+        "AUD/USD vs EUR/CHF": {
+            "best_mode": "tuned_ols",
+            "params": {"z_entry": 2.0, "z_exit": 0.5, "z_lookback": 60,
+                        "hedge_window": 252, "hedge_mode": "rolling_ols"},
+            "stats": {},
+            "coint_p": 0.01,
+        },
+        "NZD/USD vs USD/JPY": {
+            "best_mode": "tuned_ols",
+            "params": {"z_entry": 2.0, "z_exit": 0.5, "z_lookback": 60,
+                        "hedge_window": 252, "hedge_mode": "rolling_ols"},
+            "stats": {},
+            "coint_p": 0.004,
+        },
+        "__basket__": {
+            "stats_full": {"sharpe_ratio": -0.1},
+            "stats_selected": {"sharpe_ratio": 0.47},
+        },
+    }
+    path = tmp_path / "tuned.json"
+    path.write_text(json.dumps(raw))
+    cfg = _load_tuned_params(path)
+    assert set(cfg.keys()) == {"AUD/USD vs EUR/CHF", "NZD/USD vs USD/JPY"}
+    assert "__basket__" not in cfg

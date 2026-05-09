@@ -148,15 +148,24 @@ This brings up the bot, TimescaleDB (Postgres 14), Redis, Grafana, and the
 A long-lived service that runs the cointegration pairs strategy on Dukascopy
 D1 data once per day and posts a Telegram daily summary.
 
-**One-time tuning (run once before starting the daemon):**
+**One-time tuning (run one of these before starting the daemon):**
 
 ```bash
+# (a) Original 2-pair EUR/JPY + EUR/GBP study (rolling-OLS vs Kalman)
 PYTHONPATH=. python scripts/run_pairs_research.py
+
+# (b) G10 pair-basket study -- screens 9 majors via Engle-Granger,
+# walk-forward tunes each survivor, builds a risk-parity basket and
+# persists the *positive-Sharpe-only* legs for the daemon.
+PYTHONPATH=. python scripts/run_pairs_basket_research.py
 ```
 
-This produces:
+Either script writes:
 - `config/pairs_tuned.json` — the params the daemon will load
-- `reports/pairs_tuning_report_*.html` — full walk-forward + Monte Carlo report
+- `reports/pairs_*_report_*.html` — walk-forward + Monte Carlo report
+
+The basket script is what we currently recommend: more legs, better
+diversification, higher OOS Sharpe (~0.45 vs ~0.2 for the single pair).
 
 **Start the daemon (runs forever, wakes once per day):**
 
@@ -183,10 +192,13 @@ open trades, closed trades, daily PnL history) so restarts are safe.
 real-time `OPEN/CLOSE/FLIP` messages whenever a trade fires.  Set
 `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` to enable.
 
-**Honest expectation:** OOS edge after walk-forward tuning is modest
-(Sharpe ~0.2–0.3, profit factor ~1.0–1.1).  This is *not* a high-Sharpe
-strategy — treat the 30-day paper run as a sanity check on infrastructure
-and risk model, not as a guarantee of profitability.
+**Honest expectation:** even with the basket diversification trick, OOS
+edge is modest (basket Sharpe ~0.4–0.5 with the positive-Sharpe filter,
+~0.2 for the single EUR/JPY pair).  Most of the 36 candidate G10
+cointegrations turn out to be spurious under walk-forward; the basket
+result depends on the AUD/USD vs EUR/CHF "risk-on factor" pair.  Treat
+the 30-day paper run as a sanity check on infrastructure and risk model,
+not as a guarantee of profitability.
 
 ## Risk model (summary)
 
