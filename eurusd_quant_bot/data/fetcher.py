@@ -307,21 +307,93 @@ def fetch_cftc_eurusd(years: Iterable[int]) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Dukascopy (stub)
+# Dukascopy
 # ---------------------------------------------------------------------------
 
-def dukascopy_url(pair: str, day: datetime, hour: int) -> str:
-    """Return the public Dukascopy URL for one hour of BI5 tick data.
+_DUKASCOPY_GRANULARITY: dict[str, str] = {
+    "M1": "INTERVAL_MIN_1",
+    "M5": "INTERVAL_MIN_5",
+    "M15": "INTERVAL_MIN_15",
+    "M30": "INTERVAL_MIN_30",
+    "H1": "INTERVAL_HOUR_1",
+    "H4": "INTERVAL_HOUR_4",
+    "D1": "INTERVAL_DAY_1",
+}
 
-    The full binary parser (LZMA-compressed packed records) is intentionally
-    not included here; for now the bot relies on OANDA M1 candles.  Implementing
-    the parser is a discrete follow-up: see notebooks/01_data_exploration.ipynb.
+
+def dukascopy_url(pair: str, day: datetime, hour: int) -> str:
+    """Public Dukascopy URL for one hour of raw BI5 tick data.
+
+    Provided for reference / direct download workflows; the recommended path
+    is :func:`fetch_dukascopy`, which uses the maintained ``dukascopy-python``
+    library and returns clean OHLCV frames.
     """
     p = pair.replace("_", "").upper()
     return (
         f"https://datafeed.dukascopy.com/datafeed/{p}/"
         f"{day.year:04d}/{day.month - 1:02d}/{day.day:02d}/{hour:02d}h_ticks.bi5"
     )
+
+
+def fetch_dukascopy(
+    pair: str = "EUR/USD",
+    granularity: str = "H1",
+    start: str | datetime = "2015-01-01",
+    end: str | datetime | None = None,
+    offer_side: str = "BID",
+) -> pd.DataFrame:
+    """Fetch aggregated OHLCV from Dukascopy via ``dukascopy-python``.
+
+    Parameters
+    ----------
+    pair :
+        Instrument (e.g. ``"EUR/USD"``).
+    granularity :
+        One of ``M1, M5, M15, M30, H1, H4, D1``.
+    start, end :
+        ISO-format strings or timezone-aware :class:`datetime` objects in UTC.
+    offer_side :
+        ``"BID"`` or ``"ASK"`` -- BID is the conservative default for backtests.
+
+    Returns
+    -------
+    DataFrame with columns ``open, high, low, close, volume`` and a UTC
+    ``DatetimeIndex``.
+    """
+    import dukascopy_python as dp
+
+    if granularity not in _DUKASCOPY_GRANULARITY:
+        raise ValueError(f"Unsupported granularity {granularity!r}")
+    interval = getattr(dp, _DUKASCOPY_GRANULARITY[granularity])
+    side = dp.OFFER_SIDE_BID if offer_side.upper() == "BID" else dp.OFFER_SIDE_ASK
+
+    def _to_dt(value: str | datetime | None, default: datetime) -> datetime:
+        if value is None:
+            return default
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+
+    start_dt = _to_dt(start, datetime(2015, 1, 1, tzinfo=timezone.utc))
+    end_dt = _to_dt(end, datetime.now(timezone.utc))
+
+    logger.info(
+        "Dukascopy: downloading {} {} {} -> {}",
+        pair, granularity, start_dt.date(), end_dt.date(),
+    )
+    df = dp.fetch(
+        instrument=pair,
+        interval=interval,
+        offer_side=side,
+        start=start_dt,
+        end=end_dt,
+    )
+    if df.empty:
+        logger.warning("Dukascopy returned empty frame for {} {}", pair, granularity)
+        return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+
+    df.index.name = "ts"
+    return df[["open", "high", "low", "close", "volume"]].astype(float)
 
 
 # ---------------------------------------------------------------------------

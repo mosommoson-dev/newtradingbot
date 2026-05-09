@@ -89,6 +89,24 @@ python -m eurusd_quant_bot.main --mode backtest --strategy mean_reversion \
 
 The HTML report is written to `reports/backtest_<strategy>_<timestamp>.html`.
 
+### 3b. Use Dukascopy for clean H1/D1 history (recommended over yfinance)
+
+`yfinance` H1 is capped at the last 730 days. Dukascopy (free, no auth) returns
+10+ years of EUR/USD H1 in seconds:
+
+```python
+from eurusd_quant_bot.data import fetch_dukascopy, clean_ohlcv
+df = clean_ohlcv(fetch_dukascopy(granularity="H1", start="2015-01-01"))
+```
+
+The end-to-end research harness at `scripts/run_full_research.py` pulls
+Dukascopy + FRED, runs both strategies, executes a 50-trial Optuna walk-forward,
+runs Monte Carlo, and writes a v2 HTML report:
+
+```bash
+PYTHONPATH=. python scripts/run_full_research.py
+```
+
 ### 4. Walk-forward optimization
 
 ```bash
